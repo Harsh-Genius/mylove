@@ -619,6 +619,1243 @@
     <div class="footer">Designed in late nights, deployed in emotions.</div>
   </main>
 
+
+
+
+
+
+
+
+
+  <script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+  import {
+    getFirestore,
+    collection,
+    query,
+    where,
+    getDocs,
+    doc,
+    getDoc,
+    setDoc,
+    addDoc,
+    updateDoc,
+    runTransaction,
+    serverTimestamp,
+    increment
+  } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyCPGCrWyGAQxouOMrELGy7ag4AGgojqH_k",
+    authDomain: "mylove-counter.firebaseapp.com",
+    projectId: "mylove-counter",
+    storageBucket: "mylove-counter.firebasestorage.app",
+    messagingSenderId: "1024219081918",
+    appId: "1:1024219081918:web:1fa15962de4216dd2642ef",
+    measurementId: "G-X5YR046XRD"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+
+  const params = new URLSearchParams(window.location.search);
+  const initialName = (params.get("name") || "You").trim().replace(/[<>]/g, "");
+
+  let proposalId = (params.get("pid") || "").trim();
+  if (!proposalId) {
+    proposalId = "p_" + Math.random().toString(36).slice(2, 10);
+    const url = new URL(window.location.href);
+    url.searchParams.set("pid", proposalId);
+    history.replaceState({}, "", url.toString());
+  }
+
+  const appUrl = window.location.origin + window.location.pathname;
+  const proposalRef = doc(db, "proposals", proposalId);
+
+  const loader = document.getElementById("loader");
+  const card = document.getElementById("app");
+  const progressBar = document.getElementById("progressBar");
+  const progressText = document.getElementById("progressText");
+  const nameLine = document.getElementById("nameLine");
+  const nameSub = document.getElementById("nameSub");
+  const bgm = document.getElementById("bgm");
+
+  const creatorNameInput = document.getElementById("creatorName");
+  const creatorEmailInput = document.getElementById("creatorEmail");
+  const partnerNameInput = document.getElementById("partnerName");
+  const proposalTitleInput = document.getElementById("proposalTitle");
+  const proposalQuestionInput = document.getElementById("proposalQuestion");
+  const createLinkBtn = document.getElementById("createLinkBtn");
+  const copyLinkBtn = document.getElementById("copyLinkBtn");
+  const loadDashboardBtn = document.getElementById("loadDashboardBtn");
+  const generatedLink = document.getElementById("generatedLink");
+
+  const questionHeading = document.getElementById("questionHeading");
+  const commentInput = document.getElementById("commentInput");
+  const responderNameInput = document.getElementById("responderName");
+  const responderEmailInput = document.getElementById("responderEmail");
+  const yesBtn = document.getElementById("yesBtn");
+  const noBtn = document.getElementById("noBtn");
+  const result = document.getElementById("proposalResult");
+
+  const yesCountEl = document.getElementById("yesCount");
+  const yesCount2El = document.getElementById("yesCount2");
+  const browserCountEl = document.getElementById("browserCount");
+
+  const leaderboardEl = document.getElementById("leaderboard");
+  const commentsListEl = document.getElementById("commentsList");
+
+  const photoImg = document.getElementById("photoImg");
+  const photoFallback = document.getElementById("photoFallback");
+  const verdictCard = document.getElementById("verdictCard");
+
+  const visitorKey = "mylove_visitor_id";
+  let visitorId = localStorage.getItem(visitorKey);
+  if (!visitorId) {
+    visitorId = "v_" + (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
+    localStorage.setItem(visitorKey, visitorId);
+  }
+
+  const creatorEmailKey = "mylove_creator_email";
+  const creatorNameKey = "mylove_creator_name";
+  const creatorTitleKey = "mylove_creator_title";
+  const creatorQuestionKey = "mylove_creator_question";
+  const creatorPartnerKey = "mylove_creator_partner";
+
+  creatorEmailInput.value = localStorage.getItem(creatorEmailKey) || "";
+  creatorNameInput.value = localStorage.getItem(creatorNameKey) || "";
+  proposalTitleInput.value = localStorage.getItem(creatorTitleKey) || "";
+  proposalQuestionInput.value = localStorage.getItem(creatorQuestionKey) || "";
+  partnerNameInput.value = localStorage.getItem(creatorPartnerKey) || "";
+
+  creatorEmailInput.addEventListener("change", async () => {
+    const email = normalizeEmail(creatorEmailInput.value);
+    localStorage.setItem(creatorEmailKey, email);
+    await loadProposal();
+    if (email) {
+      await loadDashboardByEmail(email);
+    } else {
+      showPrivateLocked();
+    }
+  });
+
+  const voteRef = doc(db, "proposals", proposalId, "votes", visitorId);
+
+  function normalizeEmail(email) {
+    return (email || "").trim().toLowerCase();
+  }
+
+  function creatorKeyFromEmail(email) {
+    return normalizeEmail(email);
+  }
+
+  function safeText(value) {
+    return String(value ?? "").replace(/[<>]/g, "").trim();
+  }
+
+  function getActiveCreatorEmail() {
+    return normalizeEmail(creatorEmailInput.value || localStorage.getItem(creatorEmailKey));
+  }
+
+  function isAuthorizedForProposal(data) {
+    const activeEmail = getActiveCreatorEmail();
+    const ownerEmail = normalizeEmail(data?.creatorEmail || "");
+    return Boolean(activeEmail && ownerEmail && activeEmail === ownerEmail);
+  }
+
+  function showPrivateLocked(message = "Enter the creator email to unlock the dashboard and comments.") {
+    leaderboardEl.innerHTML = `<div class="leader-card">${safeText(message)}</div>`;
+    commentsListEl.innerHTML = `<div class="comment-card"><div class="comment-body">${safeText(message)}</div></div>`;
+  }
+
+  function getStoredNumber(key) {
+    return Number(localStorage.getItem(key) || "0");
+  }
+
+  function setStoredNumber(key, value) {
+    localStorage.setItem(key, String(value));
+  }
+
+  function random(min, max) {
+    return Math.random() * (max - min) + min;
+  }
+
+  function spawnHeart() {
+    const heart = document.createElement("div");
+    heart.className = "heart";
+    heart.textContent = Math.random() > 0.5 ? "💖" : "❤️";
+    const x = random(0, window.innerWidth);
+    const drift = random(-120, 120);
+    const size = random(14, 32);
+
+    heart.style.setProperty("--x", `${x}px`);
+    heart.style.setProperty("--drift", `${drift}px`);
+    heart.style.setProperty("--s", `${size / 20}`);
+    heart.style.left = "0";
+    heart.style.fontSize = `${size}px`;
+    heart.style.animationDuration = `${random(5, 9)}s`;
+
+    document.body.appendChild(heart);
+    setTimeout(() => heart.remove(), 9500);
+  }
+
+  function burstHearts(count = 24) {
+    for (let i = 0; i < count; i++) {
+      setTimeout(spawnHeart, i * 90);
+    }
+  }
+
+  function burstConfetti(count = 40) {
+    const colors = ["#fb7185", "#f43f5e", "#fbbf24", "#60a5fa", "#a855f7", "#34d399"];
+    for (let i = 0; i < count; i++) {
+      const el = document.createElement("div");
+      el.className = "confetti";
+      el.style.left = `${Math.random() * 100}vw`;
+      el.style.background = colors[Math.floor(Math.random() * colors.length)];
+      el.style.transform = `translateY(0) rotate(${Math.random() * 180}deg)`;
+      el.style.animationDuration = `${random(2.8, 5.5)}s`;
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 6000);
+    }
+  }
+
+  function typeWriter(text, el, speed = 60) {
+    let i = 0;
+    el.innerHTML = "";
+    const timer = setInterval(() => {
+      el.innerHTML = `<span class="type">${text.slice(0, i + 1)}</span>`;
+      i++;
+      if (i >= text.length) {
+        clearInterval(timer);
+        el.innerHTML = text;
+      }
+    }, speed);
+  }
+
+  function attemptPlayMusic() {
+    if (!bgm) return;
+    bgm.muted = false;
+    bgm.volume = 0.55;
+    bgm.play().catch(() => {});
+  }
+
+  async function ensureProposalDoc() {
+    const snap = await getDoc(proposalRef);
+    if (!snap.exists()) {
+      const creatorEmail = normalizeEmail(creatorEmailInput.value);
+      const creatorName = safeText(creatorNameInput.value);
+      const title = safeText(proposalTitleInput.value) || "Love Proposal";
+      const question = safeText(proposalQuestionInput.value) || "Will you be mine? 💘";
+      const partnerName = safeText(partnerNameInput.value) || initialName;
+
+      await setDoc(proposalRef, {
+        creatorName,
+        creatorEmail,
+        creatorKey: creatorKeyFromEmail(creatorEmail),
+        partnerName,
+        title,
+        question,
+        yesCount: 0,
+        commentCount: 0,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+    }
+  }
+
+  async function loadProposal() {
+    const snap = await getDoc(proposalRef);
+    const data = snap.exists() ? snap.data() : null;
+    if (!data) return;
+
+    const yesCount = Number(data.yesCount || 0);
+    yesCountEl.textContent = yesCount;
+    yesCount2El.textContent = yesCount;
+    questionHeading.textContent = data.question || "Will you be mine? 💘";
+
+    if (data.title) document.title = data.title;
+    if (data.creatorName) {
+      nameSub.innerHTML = `A special message from <span class="name-highlight">${safeText(data.creatorName)}</span>.`;
+    }
+
+    const authorized = isAuthorizedForProposal(data);
+
+    if (authorized) {
+      await renderComments(data);
+      await loadDashboardByEmail(getActiveCreatorEmail());
+    } else {
+      showPrivateLocked();
+    }
+  }
+
+  async function renderComments(proposalData = null) {
+    const data = proposalData || (await getDoc(proposalRef)).data();
+    if (!isAuthorizedForProposal(data)) {
+      commentsListEl.innerHTML = `<div class="comment-card"><div class="comment-body">Private comments. Enter the creator email below to view them.</div></div>`;
+      return;
+    }
+
+    const commentsSnap = await getDocs(collection(db, "proposals", proposalId, "comments"));
+    const comments = commentsSnap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0))
+      .slice(0, 12);
+
+    commentsListEl.innerHTML = "";
+
+    if (!comments.length) {
+      commentsListEl.innerHTML = `<div class="comment-card"><div class="comment-body">No comments yet. Be the first one 💫</div></div>`;
+      return;
+    }
+
+    comments.forEach(c => {
+      const div = document.createElement("div");
+      div.className = "comment-card";
+      div.innerHTML = `
+        <div class="comment-meta">
+          <span>${safeText(c.name || "Anonymous")}</span>
+          <span>${c.accepted ? "YES ❤️" : "NO 🙃"}</span>
+        </div>
+        <div class="comment-body">${safeText(c.comment || "") || "No comment"}</div>
+        <div class="comment-meta" style="margin-top:8px;">
+          <span>${safeText(c.email || "")}</span>
+        </div>
+      `;
+      commentsListEl.appendChild(div);
+    });
+  }
+
+
+
+async function loadDashboardByEmail(email) {
+  const creatorKey = creatorKeyFromEmail(email);
+  if (!creatorKey) {
+    showPrivateLocked("Enter your email first to load your dashboard and comments.");
+    return;
+  }
+
+  localStorage.setItem(creatorEmailKey, creatorKey);
+
+  const snap = await getDocs(
+    query(collection(db, "proposals"), where("creatorKey", "==", creatorKey))
+  );
+
+  const proposals = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+    .sort((a, b) => Number(b.yesCount || 0) - Number(a.yesCount || 0));
+
+  leaderboardEl.innerHTML = "";
+
+  if (!proposals.length) {
+    leaderboardEl.innerHTML = `<div class="leader-card">No proposals found.</div>`;
+    return;
+  }
+
+  for (let i = 0; i < proposals.length; i++) {
+    const p = proposals[i];
+
+    // 🔥 FETCH COMMENTS
+    const commentsSnap = await getDocs(
+      collection(db, "proposals", p.id, "comments")
+    );
+
+    const comments = commentsSnap.docs
+      .map(c => c.data())
+      .slice(0, 3); // show latest 3
+
+    // 🔥 FETCH VOTES (optional for names)
+    const votesSnap = await getDocs(
+      collection(db, "proposals", p.id, "votes")
+    );
+
+    const voters = votesSnap.docs
+      .map(v => v.data())
+      .slice(0, 3);
+
+    const link = `${appUrl}?name=${encodeURIComponent(p.partnerName || "You")}&pid=${p.id}`;
+
+    const div = document.createElement("div");
+    div.className = "leader-card";
+
+    div.innerHTML = `
+      <div class="leader-meta">
+        <span>#${i + 1}</span>
+        <span>${p.yesCount || 0} YES</span>
+      </div>
+
+      <div class="leader-title">${safeText(p.title || "Untitled")}</div>
+
+      <div class="leader-small">Comments: ${p.commentCount || 0}</div>
+
+      <div class="leader-small" style="margin-top:8px;">🔗 ${link}</div>
+
+      <div style="margin-top:12px;">
+        <strong>👥 Recent Votes:</strong>
+        ${voters.length ? voters.map(v => `
+          <div style="font-size:13px; color:#cbd5e1;">
+            ${safeText(v.name)} (${safeText(v.email)}) - ${v.accepted ? "YES ❤️" : "NO 🙃"}
+          </div>
+        `).join("") : `<div style="font-size:13px;">No votes yet</div>`}
+      </div>
+
+      <div style="margin-top:12px;">
+        <strong>💬 Latest Comments:</strong>
+        ${comments.length ? comments.map(c => `
+          <div style="font-size:13px; margin-top:6px; color:#e2e8f0;">
+            "${safeText(c.comment)}"
+            <div style="color:#94a3b8;">
+              - ${safeText(c.name)} (${safeText(c.email)})
+            </div>
+          </div>
+        `).join("") : `<div style="font-size:13px;">No comments</div>`}
+      </div>
+    `;
+
+    leaderboardEl.appendChild(div);
+  }
+}
+
+async function saveResponse(accepted) {
+    const comment = safeText(commentInput.value);
+    const responderName = safeText(responderNameInput.value) || "Guest";
+    const responderEmail = normalizeEmail(responderEmailInput.value);
+
+    if (!responderName || !responderEmail) {
+      result.textContent = "Please enter your name and email.";
+      return;
+    }
+
+    const commentRef = doc(collection(db, "proposals", proposalId, "comments"));
+    let alreadyVoted = false;
+
+    await runTransaction(db, async (tx) => {
+      const proposalSnap = await tx.get(proposalRef);
+      const voteSnap = await tx.get(voteRef);
+
+      if (voteSnap.exists()) {
+        alreadyVoted = true;
+        return;
+      }
+
+      const currentYes = Number((proposalSnap.data() || {}).yesCount || 0);
+      const currentComments = Number((proposalSnap.data() || {}).commentCount || 0);
+
+      tx.set(voteRef, {
+        accepted,
+        name: responderName,
+        email: responderEmail,
+        visitorId,
+        createdAt: serverTimestamp()
+      });
+
+      tx.set(commentRef, {
+        name: responderName,
+        email: responderEmail,
+        comment: comment || "",
+        accepted,
+        visitorId,
+        createdAt: serverTimestamp()
+      });
+
+      tx.set(
+        proposalRef,
+        {
+          yesCount: accepted ? currentYes + 1 : currentYes,
+          commentCount: comment ? currentComments + 1 : currentComments,
+          updatedAt: serverTimestamp()
+        },
+        { merge: true }
+      );
+    });
+
+    if (alreadyVoted) {
+      result.textContent = "Already counted for this proposal 😏";
+      return;
+    }
+
+    if (accepted) {
+      const browserCount = getStoredNumber("mylove_browser_accept_count") + 1;
+      const totalCount = getStoredNumber("mylove_total_accept_count") + 1;
+      setStoredNumber("mylove_browser_accept_count", browserCount);
+      setStoredNumber("mylove_total_accept_count", totalCount);
+      browserCountEl.textContent = browserCount;
+      result.textContent = "Yay! She said YES ❤️";
+      burstHearts(26);
+      burstConfetti(34);
+    } else {
+      result.textContent = "Response saved 🙃";
+    }
+
+    await loadProposal();
+    await renderComments();
+    await loadDashboardByEmail(creatorEmailInput.value);
+  }
+
+  function showApp() {
+    loader.classList.add("hidden");
+    card.classList.add("show");
+    typeWriter(`Dear ${initialName},`, nameLine, 55);
+    burstHearts(16);
+    setTimeout(() => burstConfetti(18), 700);
+
+    setTimeout(() => {
+      verdictCard.style.transition = "all 1s ease";
+      verdictCard.style.opacity = "1";
+      verdictCard.style.transform = "translateY(0)";
+    }, 2500);
+  }
+
+  let progress = 0;
+  const fakeLoad = setInterval(() => {
+    progress += Math.random() * 9 + 4;
+    if (progress >= 100) progress = 100;
+    progressBar.style.width = progress + "%";
+    progressText.textContent = Math.floor(progress) + "%";
+
+    if (progress >= 100) {
+      clearInterval(fakeLoad);
+      setTimeout(showApp, 350);
+    }
+  }, 120);
+
+  photoImg.addEventListener("error", () => {
+    photoImg.style.display = "none";
+    photoFallback.style.display = "grid";
+  });
+  photoFallback.style.display = "none";
+
+  await ensureProposalDoc();
+  await loadProposal();
+
+  const storedBrowser = getStoredNumber("mylove_browser_accept_count");
+  browserCountEl.textContent = storedBrowser;
+  showApp();
+
+  createLinkBtn.addEventListener("click", async () => {
+    attemptPlayMusic();
+
+    const creatorName = safeText(creatorNameInput.value);
+    const creatorEmail = normalizeEmail(creatorEmailInput.value);
+    const partnerName = safeText(partnerNameInput.value);
+    const title = safeText(proposalTitleInput.value) || "Love Proposal";
+    const question = safeText(proposalQuestionInput.value) || "Will you be mine? 💘";
+
+    if (!creatorName || !creatorEmail || !partnerName) {
+      generatedLink.textContent = "Please enter your name, email, and partner name first.";
+      return;
+    }
+
+    localStorage.setItem(creatorNameKey, creatorName);
+    localStorage.setItem(creatorEmailKey, creatorEmail);
+    localStorage.setItem(creatorTitleKey, title);
+    localStorage.setItem(creatorQuestionKey, question);
+    localStorage.setItem(creatorPartnerKey, partnerName);
+
+    await setDoc(
+      proposalRef,
+      {
+        creatorName,
+        creatorEmail,
+        creatorKey: creatorKeyFromEmail(creatorEmail),
+        partnerName,
+        title,
+        question,
+        updatedAt: serverTimestamp(),
+        createdAt: serverTimestamp()
+      },
+      { merge: true }
+    );
+
+    const link = `${appUrl}?name=${encodeURIComponent(partnerName)}&pid=${encodeURIComponent(proposalId)}`;
+    generatedLink.textContent = link;
+    await loadProposal();
+    await loadDashboardByEmail(creatorEmail);
+  });
+
+  copyLinkBtn.addEventListener("click", async () => {
+    const partnerName = safeText(partnerNameInput.value) || initialName;
+    const link = `${appUrl}?name=${encodeURIComponent(partnerName)}&pid=${encodeURIComponent(proposalId)}`;
+    try {
+      await navigator.clipboard.writeText(link);
+      generatedLink.textContent = "Copied to clipboard ✅";
+    } catch {
+      generatedLink.textContent = link;
+    }
+  });
+
+  loadDashboardBtn.addEventListener("click", async () => {
+    const email = normalizeEmail(creatorEmailInput.value);
+    if (!email) {
+      showPrivateLocked("Enter your email to load dashboard and comments.");
+      return;
+    }
+    await loadDashboardByEmail(email);
+    await loadProposal();
+  });
+
+  yesBtn.addEventListener("click", async () => {
+    attemptPlayMusic();
+    await saveResponse(true);
+  });
+
+  noBtn.addEventListener("click", async () => {
+    attemptPlayMusic();
+    await saveResponse(false);
+  });
+
+  noBtn.addEventListener("mouseenter", () => {
+    const x = random(-120, 120);
+    const y = random(-60, 60);
+    noBtn.style.transform = `translate(${x}px, ${y}px)`;
+  });
+
+  document.addEventListener("click", attemptPlayMusic, { once: true });
+  document.addEventListener("touchstart", attemptPlayMusic, { once: true });
+
+  setInterval(() => {
+    if (document.hidden) return;
+    if (Math.random() > 0.5) spawnHeart();
+  }, 1400);
+
+  setTimeout(() => burstConfetti(20), 900);
+
+  const savedCreatorEmail = normalizeEmail(localStorage.getItem(creatorEmailKey));
+  if (savedCreatorEmail) {
+    loadDashboardByEmail(savedCreatorEmail).catch(() => {});
+  } else {
+    showPrivateLocked();
+  }
+</script>
+</body>
+</html>
+
+
+
+
+
+
+
+
+<!-- <!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Important Notice</title>
+  <style>
+    :root{
+      --bg1:#050816;
+      --bg2:#0f172a;
+      --bg3:#111827;
+      --card:#111827cc;
+      --stroke:#ffffff18;
+      --text:#f8fafc;
+      --muted:#cbd5e1;
+      --accent:#fb7185;
+      --accent2:#f43f5e;
+      --shadow: 0 20px 60px rgba(0,0,0,.45);
+      --radius: 28px;
+    }
+
+    *{box-sizing:border-box}
+    html,body{
+      margin:0;
+      min-height:100%;
+      overflow-x:hidden;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color:var(--text);
+      background:
+        radial-gradient(circle at top, #1d4ed833 0%, transparent 30%),
+        radial-gradient(circle at bottom right, #be185d26 0%, transparent 32%),
+        linear-gradient(135deg,var(--bg1),var(--bg2) 45%,var(--bg3));
+    }
+
+    body{
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:24px;
+      position:relative;
+    }
+
+    .blob{
+      position:fixed;
+      width:420px;
+      height:420px;
+      border-radius:50%;
+      filter: blur(40px);
+      opacity:.35;
+      pointer-events:none;
+      z-index:0;
+      animation: floaty 12s ease-in-out infinite;
+    }
+    .blob.one{left:-120px; top:-120px; background:#fb7185;}
+    .blob.two{right:-140px; bottom:-140px; background:#60a5fa; animation-delay:-5s;}
+    .blob.three{left:20%; bottom:-180px; background:#a855f7; animation-delay:-8s;}
+
+    @keyframes floaty{
+      0%,100%{transform:translate3d(0,0,0) scale(1)}
+      50%{transform:translate3d(30px,-20px,0) scale(1.08)}
+    }
+
+    .loader{
+      position:fixed;
+      inset:0;
+      display:grid;
+      place-items:center;
+      background:linear-gradient(135deg, rgba(5,8,22,.98), rgba(15,23,42,.98));
+      z-index:999;
+      transition:opacity .4s ease, visibility .4s ease;
+    }
+    .loader.hidden{
+      opacity:0;
+      visibility:hidden;
+      pointer-events:none;
+    }
+    .loader-card{
+      width:min(460px, 92vw);
+      border-radius:28px;
+      padding:26px;
+      background:rgba(255,255,255,.06);
+      border:1px solid rgba(255,255,255,.12);
+      box-shadow:var(--shadow);
+      text-align:center;
+      backdrop-filter: blur(18px);
+    }
+    .loader h2{margin:0 0 10px;font-size:28px;}
+    .loader p{margin:0 0 18px;color:var(--muted);}
+    .bar{
+      width:100%;
+      height:12px;
+      border-radius:999px;
+      background:rgba(255,255,255,.08);
+      overflow:hidden;
+    }
+    .bar > span{
+      display:block;
+      height:100%;
+      width:0%;
+      border-radius:999px;
+      background:linear-gradient(90deg, #fb7185, #f43f5e, #fbbf24);
+      transition:width .08s linear;
+    }
+
+    .card{
+      width:min(1120px, 100%);
+      position:relative;
+      z-index:2;
+      padding:30px;
+      border-radius:var(--radius);
+      background:linear-gradient(180deg, rgba(17,24,39,.86), rgba(15,23,42,.78));
+      border:1px solid var(--stroke);
+      box-shadow:var(--shadow);
+      backdrop-filter: blur(18px);
+      overflow:hidden;
+      opacity:0;
+      transform: translateY(14px) scale(.985);
+      transition: opacity .5s ease, transform .5s ease;
+    }
+    .card.show{opacity:1;transform: translateY(0) scale(1);}
+
+    .card::before{
+      content:"";
+      position:absolute;
+      inset:-2px;
+      border-radius:inherit;
+      padding:1px;
+      background:linear-gradient(135deg, rgba(255,255,255,.18), rgba(255,255,255,0), rgba(255,255,255,.14));
+      -webkit-mask:
+        linear-gradient(#000 0 0) content-box,
+        linear-gradient(#000 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
+      pointer-events:none;
+    }
+
+    .topbar{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      margin-bottom:16px;
+      flex-wrap:wrap;
+    }
+    .badge{
+      display:inline-flex;
+      align-items:center;
+      gap:10px;
+      padding:10px 14px;
+      border-radius:999px;
+      background:rgba(255,255,255,.06);
+      border:1px solid rgba(255,255,255,.08);
+      color:var(--muted);
+      font-size:14px;
+      letter-spacing:.3px;
+    }
+    .status-dot{
+      width:10px;height:10px;border-radius:50%;
+      background:#22c55e;
+      box-shadow:0 0 0 0 rgba(34,197,94,.6);
+      animation:pulse 1.8s infinite;
+    }
+    @keyframes pulse{
+      0%{box-shadow:0 0 0 0 rgba(34,197,94,.55)}
+      70%{box-shadow:0 0 0 16px rgba(34,197,94,0)}
+      100%{box-shadow:0 0 0 0 rgba(34,197,94,0)}
+    }
+
+    h1{
+      margin:10px 0 0;
+      font-size:clamp(32px, 6vw, 62px);
+      line-height:1.02;
+      text-align:center;
+      letter-spacing:-0.03em;
+    }
+    .glow{
+      background:linear-gradient(90deg, #fff, #fda4af, #fff);
+      -webkit-background-clip:text;
+      background-clip:text;
+      color:transparent;
+      background-size:200% auto;
+      animation:textShine 5s linear infinite;
+    }
+    @keyframes textShine{to{background-position:200% center}}
+    .subtitle{
+      text-align:center;
+      margin:14px auto 0;
+      max-width:58ch;
+      color:var(--muted);
+      font-size:16px;
+      line-height:1.6;
+    }
+
+    .panel{
+      background:rgba(255,255,255,.04);
+      border:1px solid rgba(255,255,255,.08);
+      border-radius:24px;
+      padding:22px;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.04);
+    }
+    .section-title{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      margin:0 0 14px;
+      font-size:18px;
+      color:#fff;
+    }
+    .section-title span{
+      display:inline-grid;
+      place-items:center;
+      width:34px;height:34px;
+      border-radius:12px;
+      background:rgba(251,113,133,.12);
+      border:1px solid rgba(251,113,133,.18);
+    }
+
+    .creator-grid{
+      display:grid;
+      grid-template-columns:repeat(4, minmax(0,1fr));
+      gap:10px;
+    }
+    .creator-grid .full{grid-column:1/-1;}
+    .field, textarea{
+      width:100%;
+      padding:14px 16px;
+      border-radius:16px;
+      border:1px solid rgba(255,255,255,.12);
+      outline:none;
+      background:rgba(255,255,255,.07);
+      color:white;
+      font-size:15px;
+    }
+    textarea{min-height:92px;resize:vertical;}
+    .field::placeholder, textarea::placeholder{color:#94a3b8}
+
+    .share-row,.actions{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      justify-content:center;
+      align-items:center;
+    }
+
+    button{
+      border:none;
+      cursor:pointer;
+      padding:14px 18px;
+      border-radius:16px;
+      color:white;
+      font-weight:700;
+      font-size:15px;
+      transition:transform .2s ease, filter .2s ease, opacity .2s ease;
+    }
+    button:hover{transform:translateY(-2px); filter:brightness(1.05)}
+    button:active{transform:translateY(0)}
+    .btn-primary{
+      background:linear-gradient(135deg, var(--accent2), #fb7185);
+      box-shadow:0 12px 30px rgba(244,63,94,.28);
+    }
+    .btn-secondary{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.1);}
+    .btn-yes{background:linear-gradient(135deg, #16a34a, #22c55e);box-shadow:0 12px 30px rgba(34,197,94,.22);}
+    .btn-no{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.1);position:relative;}
+
+    .generated-link{
+      text-align:center;
+      color:#cbd5e1;
+      font-size:13px;
+      word-break:break-all;
+      min-height:18px;
+      margin-top:10px;
+    }
+
+    .hero{
+      display:grid;
+      grid-template-columns: 170px 1fr;
+      gap:28px;
+      align-items:center;
+      margin-top:4px;
+    }
+    .photo-shell{
+      width:170px;
+      height:170px;
+      border-radius:30px;
+      padding:6px;
+      background:linear-gradient(135deg, rgba(251,113,133,.5), rgba(96,165,250,.35), rgba(168,85,247,.35));
+      box-shadow:0 20px 45px rgba(0,0,0,.3);
+      animation:bob 4s ease-in-out infinite;
+      margin:auto;
+    }
+    @keyframes bob{
+      0%,100%{transform:translateY(0)}
+      50%{transform:translateY(-7px)}
+    }
+    .photo-frame{
+      width:100%;
+      height:100%;
+      border-radius:24px;
+      overflow:hidden;
+      background:rgba(15,23,42,.95);
+      border:1px solid rgba(255,255,255,.12);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      position:relative;
+    }
+    .photo-frame img{
+      width:100%;
+      height:100%;
+      object-fit:cover;
+      object-position:center;
+      display:block;
+    }
+    .fallback-avatar{
+      display:grid;
+      place-items:center;
+      width:100%;
+      height:100%;
+      font-size:56px;
+      color:#fff;
+      background:linear-gradient(135deg, #1d4ed8, #fb7185);
+    }
+    .name-line{
+      margin:0;
+      font-size:clamp(20px, 3vw, 34px);
+      font-weight:800;
+      letter-spacing:-0.02em;
+      min-height:48px;
+    }
+    .type{
+      display:inline-block;
+      border-right:2px solid rgba(255,255,255,.85);
+      padding-right:4px;
+      animation: caret 1s steps(1) infinite;
+    }
+    @keyframes caret{50%{border-color:transparent}}
+    .name-highlight{
+      background:linear-gradient(90deg, #fff, #fda4af, #fff);
+      -webkit-background-clip:text;
+      background-clip:text;
+      color:transparent;
+    }
+    .name-sub{
+      margin:10px 0 0;
+      color:var(--muted);
+      line-height:1.6;
+      font-size:15px;
+      max-width:60ch;
+    }
+
+    ul{list-style:none;padding:0;margin:0;display:grid;gap:10px;}
+    li{display:flex;align-items:flex-start;gap:10px;color:#e5e7eb;line-height:1.5;font-size:16px;}
+    .dot{
+      flex:0 0 auto;width:10px;height:10px;border-radius:50%;
+      background:linear-gradient(135deg, var(--accent), #fda4af);
+      margin-top:8px;
+      box-shadow:0 0 18px rgba(251,113,133,.55);
+    }
+
+    .verdict{
+      text-align:center;
+      padding:8px 0 0;
+    }
+    #verdictCard{opacity:0;transform:translateY(20px);}
+    .verdict h2{
+      margin:0;
+      font-size:clamp(26px, 4vw, 42px);
+      line-height:1.05;
+    }
+    .verdict p{
+      margin:14px auto 0;
+      max-width:34ch;
+      color:#e2e8f0;
+      font-size:17px;
+      line-height:1.6;
+    }
+    .final{
+      margin-top:14px;
+      font-size:clamp(32px, 5vw, 58px);
+      font-weight:900;
+      letter-spacing:.02em;
+      text-align:center;
+      color:transparent;
+      background:linear-gradient(90deg, #ff7aa2, #ff4d6d, #ff8fab);
+      -webkit-background-clip:text;
+      background-clip:text;
+      text-shadow:0 0 24px rgba(255,77,109,.12);
+      animation: pop 2.4s ease-in-out infinite;
+    }
+    @keyframes pop{
+      0%,100%{transform:translateY(0) scale(1)}
+      50%{transform:translateY(-4px) scale(1.02)}
+    }
+
+    .controls{display:grid;gap:14px;margin-top:18px;}
+    .result{text-align:center;min-height:28px;color:#e2e8f0;font-size:15px;}
+    .counter{
+      display:flex;
+      justify-content:center;
+      gap:14px;
+      flex-wrap:wrap;
+      margin-top:10px;
+    }
+    .counter-card{
+      padding:12px 16px;
+      border-radius:16px;
+      background:rgba(255,255,255,.06);
+      border:1px solid rgba(255,255,255,.08);
+      color:#e2e8f0;
+      font-size:14px;
+    }
+
+    .panel-top{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      flex-wrap:wrap;
+      margin-bottom:14px;
+    }
+
+    .comments-list,.leaderboard-list{
+      display:grid;
+      gap:10px;
+    }
+    .comment-card,.leader-card{
+      padding:14px 16px;
+      border-radius:16px;
+      background:rgba(255,255,255,.05);
+      border:1px solid rgba(255,255,255,.08);
+    }
+    .comment-meta,.leader-meta{
+      display:flex;
+      justify-content:space-between;
+      gap:12px;
+      flex-wrap:wrap;
+      color:#cbd5e1;
+      font-size:13px;
+      margin-bottom:6px;
+    }
+    .comment-body{color:#fff;line-height:1.5;}
+    .leader-title{font-weight:800;color:#fff;margin-bottom:4px;}
+    .leader-small{color:#cbd5e1;font-size:13px;}
+
+    .footer{
+      margin-top:18px;
+      text-align:center;
+      color:#cbd5e1;
+      font-size:13px;
+      opacity:.85;
+    }
+
+    .heart{
+      position:fixed;
+      left:0;
+      top:0;
+      pointer-events:none;
+      z-index:1;
+      font-size:18px;
+      filter: drop-shadow(0 8px 20px rgba(255,77,109,.22));
+      animation: rise linear forwards;
+      user-select:none;
+    }
+    @keyframes rise{
+      from{transform:translate3d(var(--x), 110vh, 0) scale(var(--s));opacity:0;}
+      10%{opacity:1}
+      to{transform:translate3d(calc(var(--x) + var(--drift)), -20vh, 0) scale(calc(var(--s) * 1.2));opacity:0;}
+    }
+    .confetti{
+      position:fixed;
+      top:-12px;
+      width:10px;
+      height:16px;
+      border-radius:2px;
+      pointer-events:none;
+      z-index:1;
+      animation: fall linear forwards;
+    }
+    @keyframes fall{
+      to{transform:translateY(110vh) rotate(720deg);opacity:0;}
+    }
+
+    @media (max-width: 900px){
+      .creator-grid{grid-template-columns:repeat(2, minmax(0,1fr));}
+    }
+    @media (max-width: 760px){
+      .hero{grid-template-columns:1fr;justify-items:center;text-align:center}
+      .photo-shell{width:150px;height:150px}
+      .card{padding:20px}
+      .panel{padding:18px}
+      .topbar{justify-content:center}
+      .creator-grid{grid-template-columns:1fr;}
+    }
+  </style>
+</head>
+<body>
+  <div class="loader" id="loader">
+    <div class="loader-card">
+      <h2>Loading surprise...</h2>
+      <p>Preparing something unforgettable… love, chaos, and a spark of magic.</p>
+      <div class="bar"><span id="progressBar"></span></div>
+      <p id="progressText" style="margin-top:12px;">0%</p>
+    </div>
+  </div>
+
+  <div class="blob one"></div>
+  <div class="blob two"></div>
+  <div class="blob three"></div>
+
+  <audio id="bgm" src="assets/romantic.mp3" loop preload="auto" autoplay muted></audio>
+
+  <main class="card" id="app">
+    <div class="topbar">
+      <div class="badge"><span class="status-dot"></span> Confidential Relationship File</div>
+      <div class="badge">Accepted: <span id="yesCount">0</span></div>
+    </div>
+
+    <h1 class="glow">⚠️ Important Notice ⚠️</h1>
+    <p class="subtitle">Every decision starts with a proposal.</p>
+
+    
+    <div class="hero">
+      <div class="photo-shell">
+        <div class="photo-frame">
+          <img id="photoImg" src="photo.jpg" alt="Your photo" />
+          <div class="fallback-avatar" id="photoFallback">💖</div>
+        </div>
+      </div>
+
+      <div class="name-block">
+        <div class="name-line" id="nameLine"></div>
+        <p class="name-sub" id="nameSub">A special message, made just for one lucky person.</p>
+      </div>
+    </div>
+
+    <div class="grid">
+      <section class="panel">
+        <h3 class="section-title"><span>💌</span>Charges</h3>
+        <ul>
+          <li><span class="dot"></span>Stealing my attention without asking.</li>
+          <li><span class="dot"></span>Making my heart do extra work.</li>
+          <li><span class="dot"></span>Living in my mind rent-free.</li>
+          <li><span class="dot"></span>Being dangerously adorable.</li>
+        </ul>
+      </section>
+
+      <section class="panel verdict" id="verdictCard">
+        <h2>Final Verdict</h2>
+        <p>You are sentenced to unlimited love, endless hugs, and permanent VIP access to my heart.</p>
+        <div class="final">APRIL FOOL 😜</div>
+      </section>
+
+      <section class="panel proposal" style="grid-column:1/-1;">
+        <h2 id="questionHeading">Will you be mine? 💘</h2>
+        <p>Choose carefully. The buttons below may cause extreme sweetness.</p>
+
+        <div class="controls">
+          <input class="field" id="responderName" placeholder="Your name" />
+          <input class="field" id="responderEmail" placeholder="Your email" />
+          <textarea id="commentInput" placeholder="Optional comment... say something sweet 💬"></textarea>
+
+          <div class="actions">
+            <button class="btn-yes" id="yesBtn">YES ❤️</button>
+            <button class="btn-no" id="noBtn">NO 🙃</button>
+          </div>
+
+          <div class="result" id="proposalResult"></div>
+
+          <div class="counter">
+            <div class="counter-card">This browser accepted: <strong id="browserCount">0</strong></div>
+            <div class="counter-card">Total happy clicks: <strong id="yesCount2">0</strong></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" style="grid-column:1/-1;">
+        <div class="panel-top">
+          <h3 class="section-title" style="margin:0;"><span>📊</span> My dashboard</h3>
+          <div class="badge">Keyed by creator email</div>
+        </div>
+        <div class="leaderboard-list" id="leaderboard"></div>
+      </section>
+
+      <section class="panel" style="grid-column:1/-1;">
+        <div class="panel-top">
+          <h3 class="section-title" style="margin:0;"><span>💬</span> Latest comments</h3>
+          <div class="badge">Saved in Love</div>
+        </div>
+        <div class="comments-list" id="commentsList"></div>
+      </section>
+
+      <section class="panel" style="grid-column:1/-1;">
+        <h2>I LOVE YOU ❤️</h2>
+        <p>Not a prank. Not a joke. Just the truth.</p>
+      </section>
+    </div>
+
+    <section class="panel">
+      <div class="panel-top">
+        <h3 class="section-title" style="margin:0;"><span>🧑‍💻</span> Creator setup</h3>
+      </div>
+
+      <div class="creator-grid">
+        <input class="field" id="creatorName" placeholder="Your name" />
+        <input class="field" id="creatorEmail" placeholder="Your email" />
+        <input class="field" id="partnerName" placeholder="Partner name" />
+        <input class="field" id="proposalTitle" placeholder="Proposal title" />
+        <input class="field full" id="proposalQuestion" placeholder="Question shown to friend" />
+        <button class="btn-primary full" id="createLinkBtn" style="grid-column:1/-1;">Create / Update Link</button>
+        <div class="full" style="display:flex; gap:10px; flex-wrap:wrap; justify-content:center;">
+          <button class="btn-secondary" id="copyLinkBtn">Copy Link</button>
+          <button class="btn-secondary" id="loadDashboardBtn">Load My Dashboard</button>
+        </div>
+        <div class="generated-link full" id="generatedLink" style="grid-column:1/-1;"></div>
+      </div>
+    </section>
+
+
+    <div class="footer">Designed in late nights, deployed in emotions.</div>
+  </main>
+
   <!-- <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
     import {
@@ -6620,4 +7857,4 @@ async function saveResponse(accepted) {
 </script>
 
 </body>
-</html> --> --> --> --> -->
+</html> --> --> --> --> --> -->
