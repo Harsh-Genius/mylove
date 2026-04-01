@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Important Notice</title>
+  <style>
+    body {
+      text-align: center;
+      font-family: Arial;
+      background: #0f172a;
+      color: white;
+      padding-top: 100px;
+    }
+    h1 { color: #f43f5e; }
+    .box {
+      background: #1e293b;
+      padding: 30px;
+      border-radius: 10px;
+      display: inline-block;
+    }
+  </style>
+</head>
+
+<body>
+
+<div class="box">
+  <h1>⚠️ Important Notice ⚠️</h1>
+
+  <p id="name"></p>
+
+  <p>You have been found guilty of:</p>
+  <p>❤️ Stealing my heart<br>
+     😊 Making me smile<br>
+     🧠 Living in my mind rent-free</p>
+
+  <h2>Verdict:</h2>
+  <p>Lifetime love with me 😏</p>
+
+  <h2>APRIL FOOL 😜</h2>
+
+  <h1>I LOVE YOU ❤️</h1>
+</div>
+
+<script>
+  const params = new URLSearchParams(window.location.search);
+  const name = params.get("name");
+
+  if (name) {
+    document.getElementById("name").innerText = "Dear " + name + ",";
+  } else {
+    document.getElementById("name").innerText = "Dear You,";
+  }
+</script>
+
+</body>
+</html>
